@@ -68,13 +68,10 @@ Pointing `-Path` at a single `.ps1` or `.psm1` with no sibling manifest graphs o
 
 ## Tests
 
-`requirements.psd1` declares Pester 6.1.0 or later and InvokeBuild 5.14.23. The build runs with InvokeBuild (`module.build.ps1`).
+`requirements.psd1` declares Pester 6.1.0 or later and InvokeBuild 5.14.23. The build script installs [ModuleFast](https://github.com/JustinGrote/ModuleFast) if it is missing, uses it to install what `requirements.psd1` declares, and then runs the tests with InvokeBuild. Nothing needs installing first:
 
 ```powershell
-# once per machine
-Install-PSResource -RequiredResourceFile ./requirements.psd1 -Scope CurrentUser -TrustRepository
-
-Import-Module InvokeBuild -RequiredVersion 5.14.23
-Invoke-Build              # default task: Test
-Invoke-Build Bootstrap    # re-install the requirements
+./module.build.ps1
 ```
+
+Once InvokeBuild 5.14.23 is installed, `Invoke-Build` works too.
