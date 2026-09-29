@@ -1,0 +1,3 @@
+function Assert-Something {
+    $true
+}
