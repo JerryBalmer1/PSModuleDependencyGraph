@@ -1,8 +1,12 @@
-# Install with: Install-PSResource -RequiredResourceFile ./requirements.psd1
-# build.ps1 imports Pester at this floor and refuses to run tests below it.
+# Install with: Install-PSResource -RequiredResourceFile ./requirements.psd1 -Scope CurrentUser -TrustRepository
+# module.build.ps1 reads these versions: Pester is a floor, InvokeBuild is pinned.
 @{
-    Pester = @{
+    Pester      = @{
         version    = '[6.1.0, )'
+        repository = 'PSGallery'
+    }
+    InvokeBuild = @{
+        version    = '[5.14.23]'
         repository = 'PSGallery'
     }
 }
