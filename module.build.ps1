@@ -37,10 +37,23 @@ $requirements   = Import-PowerShellDataFile -LiteralPath $requirementsPath
 $pesterFloor    = [version]($requirements.Pester.version -replace '^\[([^,\]]+).*$', '$1')
 $invokeBuildPin = [version]($requirements.InvokeBuild.version -replace '^\[([^,\]]+).*$', '$1')
 
+# Import the required versions, and confirm what actually loaded: an older copy
+# elsewhere on PSModulePath must not be the one that runs.
+Get-Module -Name Pester | Remove-Module -Force
+Import-Module -Name Pester -MinimumVersion $pesterFloor -Force
+$loadedPester = (Get-Module -Name Pester).Version
+if ($loadedPester -lt $pesterFloor) {
+    throw "Pester $pesterFloor or later is required, but $loadedPester loaded."
+}
+
 # Called directly rather than by Invoke-Build: hand over to the pinned InvokeBuild.
 if ([System.IO.Path]::GetFileName($MyInvocation.ScriptName) -ne 'Invoke-Build.ps1') {
     Get-Module -Name InvokeBuild | Remove-Module -Force
     Import-Module -Name InvokeBuild -RequiredVersion $invokeBuildPin
+    $loadedInvokeBuild = (Get-Module -Name InvokeBuild).Version
+    if ($loadedInvokeBuild -ne $invokeBuildPin) {
+        throw "InvokeBuild $invokeBuildPin is required, but $loadedInvokeBuild loaded."
+    }
     Invoke-Build -Task $Tasks -File $PSCommandPath
     return
 }
@@ -50,11 +63,12 @@ if ($runningInvokeBuild -ne $invokeBuildPin) {
     throw "InvokeBuild $invokeBuildPin is required, but $runningInvokeBuild is running. Run: ./module.build.ps1"
 }
 
+Enter-Build {
+    Write-Build Green "Pester $loadedPester, InvokeBuild $runningInvokeBuild"
+}
+
 # Synopsis: Run the Pester tests.
 task Test {
-    Get-Module -Name Pester | Remove-Module -Force
-    Import-Module -Name Pester -MinimumVersion $pesterFloor -Force
-
     $config = New-PesterConfiguration
     $config.Run.Path = Join-Path $BuildRoot 'tests'
     $config.Run.PassThru = $true
