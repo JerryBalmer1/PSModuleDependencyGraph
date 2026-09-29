@@ -476,7 +476,7 @@ function Get-PSModuleDependencyGraph {
         )
 
         $typeCount = { param([string] $Type) @($nodes | Where-Object Type -EQ $Type).Count }
-        $graph = [ModuleDependencyGraph]@{
+        $graph = New-ModuleDependencyGraph -Property @{
             ModuleName         = $target.Name
             ModuleVersion      = $target.Version
             ModuleBase         = $target.ModuleBase

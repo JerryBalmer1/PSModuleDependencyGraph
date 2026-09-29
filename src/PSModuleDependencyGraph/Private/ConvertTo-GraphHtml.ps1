@@ -22,7 +22,7 @@ function ConvertTo-GraphHtml {
     [OutputType([string])]
     param(
         [Parameter(Mandatory)]
-        [ModuleDependencyGraph] $Graph,
+        [object] $Graph,
 
         [string] $Title,
 
@@ -72,11 +72,16 @@ function ConvertTo-GraphHtmlData {
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
         [Parameter(Mandatory)]
-        [ModuleDependencyGraph] $Graph
+        [object] $Graph
     )
 
     $moduleBase = $Graph.ModuleBase
     $nodeIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+
+    # A list as an array with no $null in it. A graph read back from
+    # Export-Clixml has $null where an empty list was, and piping $null runs
+    # the pipeline once, for it.
+    $list = { param($Value) @($Value | Where-Object { $null -ne $_ }) }
 
     $nodes = foreach ($node in $Graph.Nodes) {
         [void]$nodeIds.Add($node.Id)
@@ -97,21 +102,21 @@ function ConvertTo-GraphHtmlData {
             synopsis             = if ($node.Help) { $node.Help.Synopsis } else { $null }
             exampleCount         = if ($node.Help) { @($node.Help.Examples).Count } else { 0 }
             parameterSets        = @(
-                foreach ($set in $node.ParameterSets) {
+                foreach ($set in & $list $node.ParameterSets) {
                     [ordered]@{
                         name       = $set.Name
                         isDefault  = [bool]$set.IsDefault
-                        parameters = @($set.Parameters | ForEach-Object {
+                        parameters = @(& $list $set.Parameters | ForEach-Object {
                                 [ordered]@{ name = $_.Name; type = $_.TypeName; mandatory = [bool]$_.Mandatory }
                             })
                     }
                 }
             )
-            outputType           = @($node.OutputType)
-            inferredOutputType   = @($node.InferredOutputType)
-            undeclaredOutputType = @($node.UndeclaredOutputType)
-            outputBy             = @($node.OutputBy)
-            undeclaredOutputBy   = @($node.UndeclaredOutputBy)
+            outputType           = & $list $node.OutputType
+            inferredOutputType   = & $list $node.InferredOutputType
+            undeclaredOutputType = & $list $node.UndeclaredOutputType
+            outputBy             = & $list $node.OutputBy
+            undeclaredOutputBy   = & $list $node.UndeclaredOutputBy
             moduleName           = $node.ModuleName
             moduleVersion        = if ($node.ModuleVersion) { [string]$node.ModuleVersion } else { $null }
             commandType          = $node.CommandType
@@ -132,14 +137,14 @@ function ConvertTo-GraphHtmlData {
         }
     }
 
-    $modules = foreach ($module in $Graph.Modules) {
+    $modules = foreach ($module in & $list $(if ($Graph.PSObject.Properties['Modules']) { $Graph.Modules })) {
         [ordered]@{
             name        = $module.Name
             version     = $module.Version
             installed   = [bool]$module.IsInstalled
-            declaredBy  = @($module.DeclaredBy)
-            commands    = @($module.Commands)
-            usedBy      = @($module.UsedBy)
+            declaredBy  = & $list $module.DeclaredBy
+            commands    = & $list $module.Commands
+            usedBy      = & $list $module.UsedBy
         }
     }
 

@@ -193,6 +193,43 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
         }
     }
 
+    Context 'What it takes from the pipeline' {
+        It 'still takes the graph after the module is changed and re-imported in the same session' {
+            # PowerShell caches parsed files. With the class and Get changed but
+            # Save not, a Save typed [ModuleDependencyGraph] kept the old class
+            # and refused the new graph: "cannot be bound to any parameters".
+            $copy = Join-Path $TestDrive 'reimport/PSModuleDependencyGraph'
+            Copy-Item (Join-Path $RepoRoot 'src/PSModuleDependencyGraph') $copy -Recurse
+            $fixture = Join-Path $ModuleTestsRoot 'StandardModule/ManifestExport'
+            $out = Join-Path $TestDrive 'reimport.html'
+            $result = pwsh -NoProfile -NonInteractive -Command "
+                `$ErrorActionPreference = 'Stop'
+                Import-Module '$copy/PSModuleDependencyGraph.psd1' -Force
+                `$null = Get-PSModuleDependencyGraph -Path '$fixture' | Save-PSModuleDependencyGraphHtml -Path '$out'
+                Add-Content '$copy/PSModuleDependencyGraph.psm1' '# changed'
+                Add-Content '$copy/Public/Get-PSModuleDependencyGraph.ps1' '# changed'
+                Import-Module '$copy/PSModuleDependencyGraph.psd1' -Force
+                try { (Get-PSModuleDependencyGraph -Path '$fixture' | Save-PSModuleDependencyGraphHtml -Path '$out').Name }
+                catch { 'FAILED: ' + `$_.Exception.Message }
+            "
+            $result | Select-Object -Last 1 | Should -Be 'reimport.html'
+        }
+
+        It 'takes a graph saved with Export-Clixml and read back' {
+            $xml = Join-Path $TestDrive 'graph.clixml'
+            Get-FixtureGraph 'StandardModule/ManifestExport' | Export-Clixml -Path $xml -Depth 8
+            $restored = Import-Clixml -Path $xml
+            $file = $restored | Save-PSModuleDependencyGraphHtml -Path (Join-Path $TestDrive 'restored.html')
+            $data = Get-EmbeddedJson ([System.IO.File]::ReadAllText($file.FullName)) 'graph-data' | ConvertFrom-Json
+            $data.nodes.Count | Should -Be $restored.Nodes.Count
+        }
+
+        It 'refuses something that is not a graph, saying what is missing' {
+            { [pscustomobject]@{ ModuleName = 'x' } | Save-PSModuleDependencyGraphHtml -Path (Join-Path $TestDrive 'no.html') -ErrorAction Stop } |
+                Should -Throw -ExpectedMessage '*has no Nodes, Edges property*'
+        }
+    }
+
     Context 'Ambiguous calls' {
         It 'keeps the resolution, so the page can draw both edges dashed' {
             $graph = Get-FixtureGraph 'StandardModule/NameCollision'
@@ -221,7 +258,7 @@ Describe 'Get-PSModuleDependencyGraph -ShowInBrowser / -ShowInVSCode' {
             $graph = Get-PSModuleDependencyGraph -Path $fixture -ShowInBrowser
         }
 
-        It 'saves the page as $env:TEMP\PSModuleDependencyGraph\<ModuleName>.html' {
+        It 'saves the page in $env:TEMP\PSModuleDependencyGraph, named after the module' {
             $expected | Should -Exist
         }
 

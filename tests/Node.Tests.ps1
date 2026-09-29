@@ -15,6 +15,15 @@ Describe 'Graph nodes' {
             @($shapes).Count | Should -Be 1
         }
 
+        It 'gives every node an array, never $null, for <Property>' -ForEach @(
+            'DependsOn', 'UsedBy', 'ExternalCalls', 'ModulesUsed', 'Parameters', 'ParameterSets',
+            'OutputType', 'InferredOutputType', 'UndeclaredOutputType', 'OutputBy', 'UndeclaredOutputBy'
+        ).ForEach({ @{ Property = $_ } }) {
+            foreach ($node in $graph.Nodes) {
+                , $node.$Property | Should -BeOfType [array] -Because "$($node.Kind) $($node.Name).$Property"
+            }
+        }
+
         It 'records where each function starts and ends' {
             $node = Get-FunctionNode $graph 'Get-Something'
             $node.StartLine | Should -Be 1

@@ -35,6 +35,16 @@ class ModuleDependencyGraph {
     [object]   $Stats
 }
 
+# The only place [ModuleDependencyGraph] is named. PowerShell caches each file it
+# parses, type references included: a function file left unchanged across a
+# re-import keeps pointing at the class from the import before, and a graph of
+# the new class would then fail to bind to it by type. So the class is built
+# here, next to its definition, and everything else takes a graph by its shape.
+function New-ModuleDependencyGraph {
+    param([Parameter(Mandatory)] [hashtable] $Property)
+    [ModuleDependencyGraph]$Property
+}
+
 $private = Join-Path $PSScriptRoot 'Private'
 if (Test-Path -LiteralPath $private) {
     Get-ChildItem -Path $private -Filter '*.ps1' -File -Recurse | Sort-Object FullName | ForEach-Object {

@@ -40,6 +40,8 @@ function New-GraphNode {
         default { if ($Function -and $Function.IsExported) { 'Public' } else { 'Private' } }
     }
 
+    # Lists are written @(if ...) so an empty one is an empty array. An if used
+    # as a value unrolls @() into nothing, which left these $null.
     [pscustomobject]@{
         PSTypeName           = 'PSModuleDependencyGraph.GraphNode'
         Id                   = $Id
@@ -58,11 +60,11 @@ function New-GraphNode {
         ModulesUsed          = [string[]]@()
         CmdletBinding        = if ($Function) { [bool]$Function.CmdletBinding } else { $false }
         DefaultParameterSet  = if ($Function) { $Function.DefaultParameterSet } else { $null }
-        Parameters           = if ($Function) { @($Function.Parameters) } else { @() }
-        ParameterSets        = if ($Function) { @($Function.ParameterSets) } else { @() }
+        Parameters           = @(if ($Function) { $Function.Parameters })
+        ParameterSets        = @(if ($Function) { $Function.ParameterSets })
         Help                 = if ($Function) { $Function.Help } else { $null }
-        OutputType           = if ($Function) { [string[]]@($Function.OutputType) } else { [string[]]@() }
-        InferredOutputType   = if ($Function) { [string[]]@($Function.InferredOutputType) } else { [string[]]@() }
+        OutputType           = [string[]]@(if ($Function) { $Function.OutputType })
+        InferredOutputType   = [string[]]@(if ($Function) { $Function.InferredOutputType })
         UndeclaredOutputType = [string[]]@()
         OutputBy             = [string[]]@()
         UndeclaredOutputBy   = [string[]]@()

@@ -15,7 +15,8 @@ function Save-PSModuleDependencyGraphHtml {
         Colours, spacing, what shows at first and the right-click menu come from
         Resources/GraphHtmlConfig.psd1; -ConfigPath merges your own settings over it.
     .PARAMETER InputObject
-        Graph from Get-PSModuleDependencyGraph.
+        Graph from Get-PSModuleDependencyGraph, or one saved with Export-Clixml and
+        read back. Anything with ModuleName, Nodes and Edges properties is taken.
     .PARAMETER Path
         File to write. Its folder is created when missing.
     .PARAMETER Title
@@ -39,7 +40,8 @@ function Save-PSModuleDependencyGraphHtml {
     param(
         [Parameter(Mandatory, ValueFromPipeline)]
         [ValidateNotNull()]
-        [ModuleDependencyGraph] $InputObject,
+        [ValidateScript({ Test-GraphObject -InputObject $_ })]
+        [object] $InputObject,
 
         [Parameter(Mandatory, Position = 0)]
         [ValidateNotNullOrEmpty()]
