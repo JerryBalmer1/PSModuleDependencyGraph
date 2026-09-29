@@ -64,12 +64,14 @@
 
     # Layered layout: each caller comes before what it calls.
     Layout     = @{
-        # LeftToRight or TopToBottom. The page can switch between them.
+        # RightToLeft, LeftToRight, TopToBottom or BottomToTop. The page can
+        # switch between them.
         Direction   = 'LeftToRight'
         # directed: by call direction. hubsize: most-connected node first.
         SortMethod  = 'directed'
         # LevelSeparation: between layers. NodeSpacing: between nodes in one
-        # layer. TreeSpacing: between unconnected groups.
+        # layer. TreeSpacing: between unconnected groups. RightToLeft uses the
+        # LeftToRight spacing and BottomToTop the TopToBottom spacing.
         LeftToRight = @{ LevelSeparation = 330; NodeSpacing = 50; TreeSpacing = 70 }
         TopToBottom = @{ LevelSeparation = 110; NodeSpacing = 300; TreeSpacing = 260 }
     }

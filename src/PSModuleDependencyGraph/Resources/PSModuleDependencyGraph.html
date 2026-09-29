@@ -216,7 +216,9 @@ div.vis-tooltip {
                 <h2>Layout</h2>
                 <select id="direction">
                     <option value="LeftToRight">Left to right</option>
+                    <option value="RightToLeft">Right to left</option>
                     <option value="TopToBottom">Top to bottom</option>
+                    <option value="BottomToTop">Bottom to top</option>
                 </select>
                 <div class="buttons">
                     <button type="button" id="fit">Fit</button>
@@ -353,14 +355,22 @@ div.vis-tooltip {
     // ---- Layout -----------------------------------------------------------
     // The layered layout places every node itself, callers before callees, so
     // physics is off: the picture is the same on every open and does not drift.
+    // A reversed direction mirrors its pair, so it shares that pair's spacing.
+    const directions = {
+        LeftToRight: { vis: 'LR', spacing: 'LeftToRight' },
+        RightToLeft: { vis: 'RL', spacing: 'LeftToRight' },
+        TopToBottom: { vis: 'UD', spacing: 'TopToBottom' },
+        BottomToTop: { vis: 'DU', spacing: 'TopToBottom' }
+    };
     function layoutOptions(direction) {
-        const horizontal = direction === 'LeftToRight';
-        const spacing = config.Layout[direction];
+        const { vis: visDirection, spacing: spacingKey } = directions[direction];
+        const horizontal = spacingKey === 'LeftToRight';
+        const spacing = config.Layout[spacingKey];
         return {
             layout: {
                 hierarchical: {
                     enabled: true,
-                    direction: horizontal ? 'LR' : 'UD',
+                    direction: visDirection,
                     sortMethod: config.Layout.SortMethod,
                     shakeTowards: 'roots',
                     levelSeparation: spacing.LevelSeparation,

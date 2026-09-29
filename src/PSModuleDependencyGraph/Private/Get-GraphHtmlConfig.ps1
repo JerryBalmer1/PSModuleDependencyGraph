@@ -99,8 +99,8 @@ function Assert-GraphHtmlConfig {
     foreach ($type in @($Config.Show.Types)) {
         if ($type -notin $groupNames) { $problems.Add("Show.Types names '$type', which is not a NodeGroups Name.") }
     }
-    if ($Config.Layout.Direction -notin 'LeftToRight', 'TopToBottom') {
-        $problems.Add("Layout.Direction must be LeftToRight or TopToBottom; got '$($Config.Layout.Direction)'.")
+    if ($Config.Layout.Direction -notin 'RightToLeft', 'LeftToRight', 'TopToBottom', 'BottomToTop') {
+        $problems.Add("Layout.Direction must be RightToLeft, LeftToRight, TopToBottom or BottomToTop; got '$($Config.Layout.Direction)'.")
     }
     if ($Config.Layout.SortMethod -notin 'directed', 'hubsize') {
         $problems.Add("Layout.SortMethod must be directed or hubsize; got '$($Config.Layout.SortMethod)'.")

@@ -186,7 +186,7 @@ VS Code has no built-in HTML preview, so `-ShowInVSCode` opens the page as sourc
 
 ![ManifestExport dependency graph](docs/images/ManifestExport.png)
 
-The page is one self-contained file, with no internet connection needed, so it can be attached to a ticket or mailed. Everything is laid out left to right, each caller before what it calls:
+The page is one self-contained file, with no internet connection needed, so it can be attached to a ticket or mailed. Everything is laid out left to right, each caller before what it calls; **Layout** switches to right to left, top to bottom or bottom to top:
 
 - **Colors by type:** **cyan** is public, **blue** private, **red dashed** unresolved, and **magenta** external, with the command's module written under its name. Classes are **amber** and enums **green**. An external command not found on this machine has a dashed border.
 - **Show:** one box per type, with counts. Untick a type to hide it; click its name to select every node of that type.
