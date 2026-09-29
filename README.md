@@ -41,7 +41,33 @@ Set-Something Write-SomethingStore      Unique
 
 To graph your own code, point `-Path` at a module folder, a `.psd1`, a `.psm1`, or a `.ps1` script. The other folders under `ModuleTests/` work the same way, for example `./ModuleTests/Script/SingleFile/Invoke-Report.ps1` or `./ModuleTests/StandardModule/NameCollision`.
 
-The result also carries `Roots`, `Leaves`, `Unresolved`, `AmbiguousNames`, and `Stats`.
+The result is a `ModuleDependencyGraph` and also carries `Roots`, `Leaves`, `Unresolved`, `AmbiguousNames`, and `Stats`.
+
+## Viewing the graph as HTML
+
+The same module, drawn as an interactive page. Paste this from the root of the repository:
+
+```powershell
+Import-Module ./src/PSModuleDependencyGraph/PSModuleDependencyGraph.psd1
+
+Get-PSModuleDependencyGraph -Path ./ModuleTests/StandardModule/ManifestExport |
+    Save-PSModuleDependencyGraphHtml -Path ./ManifestExport.html
+```
+
+Or save it to `$env:TEMP\PSModuleDependencyGraph\ManifestExport.html` and open it in your default browser in one step:
+
+```powershell
+Get-PSModuleDependencyGraph -Path ./ModuleTests/StandardModule/ManifestExport -Show
+```
+
+![ManifestExport dependency graph](docs/images/ManifestExport.png)
+
+The page is one self-contained file, with no internet connection needed, so it can be attached to a ticket or mailed. Functions are laid out left to right, each caller before what it calls:
+
+- **Blue** functions are exported, **grey** are not, and the ellipse is code at a file's top level.
+- A **dashed amber** arrow is an ambiguous call: more than one function has that name (try `./ModuleTests/StandardModule/NameCollision`).
+- Click a function to see its file, line, what it calls and what calls it. Search by name, show exported functions only, or switch to top-to-bottom.
+- `-IncludeUnresolved` adds the commands the module calls but does not define, such as `Get-ChildItem`, behind a checkbox on the page.
 
 ## How a function is decided to be exported
 
@@ -75,3 +101,9 @@ Pointing `-Path` at a single `.ps1` or `.psm1` with no sibling manifest graphs o
 ```
 
 Once InvokeBuild 5.14.23 is installed, `Invoke-Build` works too.
+
+## Credits
+
+The HTML view is inspired by [PSWriteHTML](https://github.com/EvotecIT/PSWriteHTML) by [Przemysław Kłys](https://github.com/PrzemyslawKlys) of [Evotec](https://evotec.xyz). Its `New-HTMLDiagram` showed the approach used here: hand [vis-network](https://visjs.github.io/vis-network/) a list of nodes, a list of edges and a set of layout options, and let the browser draw it. This module does not use PSWriteHTML's code; it builds the page itself so that it runs on PowerShell 7.4 and later.
+
+vis-network 10.1.2 is included in `src/PSModuleDependencyGraph/Resources/` and embedded in each saved page. It is dual-licensed under the Apache 2.0 and MIT licenses; both license files are next to it.

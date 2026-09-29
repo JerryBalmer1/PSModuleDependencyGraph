@@ -8,7 +8,7 @@
     Description          = 'Builds a dependency graph of the public and private functions in a PowerShell module or script, statically through the AST. Nothing is imported, dot-sourced, or executed.'
     PowerShellVersion    = '7.4'
     CompatiblePSEditions = @('Core')
-    FunctionsToExport    = @('Get-PSModuleDependencyGraph')
+    FunctionsToExport    = @('Get-PSModuleDependencyGraph', 'Save-PSModuleDependencyGraphHtml')
     CmdletsToExport      = @()
     VariablesToExport    = @()
     AliasesToExport      = @()

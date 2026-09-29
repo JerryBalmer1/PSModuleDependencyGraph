@@ -15,9 +15,14 @@ function Get-PSModuleDependencyGraph {
         files are two nodes, and neither can overwrite the other. See
         New-GraphNodeId and Resolve-GraphNodeCandidate for what that costs at
         the point a call has to be pointed at one of them.
+    .PARAMETER Show
+        Also save the graph as an HTML page in $env:TEMP\PSModuleDependencyGraph\<ModuleName>.html
+        and open it in the default browser. The graph is still returned.
+    .EXAMPLE
+        Get-PSModuleDependencyGraph -Path ./ModuleTests/StandardModule/ManifestExport -Show
     #>
     [CmdletBinding(DefaultParameterSetName = 'ByName')]
-    [OutputType([pscustomobject])]
+    [OutputType('ModuleDependencyGraph')]
     param(
         [Parameter(Mandatory, ParameterSetName = 'ByName', Position = 0)]
         [ValidateNotNullOrEmpty()]
@@ -32,7 +37,10 @@ function Get-PSModuleDependencyGraph {
 
         [Parameter(Mandatory, ParameterSetName = 'ByModuleInfo', ValueFromPipeline = $true)]
         [ValidateNotNull()]
-        [System.Management.Automation.PSModuleInfo] $ModuleInfo
+        [System.Management.Automation.PSModuleInfo] $ModuleInfo,
+
+        [Parameter()]
+        [switch] $Show
     )
 
     process {
@@ -316,8 +324,7 @@ function Get-PSModuleDependencyGraph {
                 Sort-Object
         )
 
-        [pscustomobject]@{
-            PSTypeName      = 'PSModuleDependencyGraph.DependencyGraph'
+        $graph = [ModuleDependencyGraph]@{
             ModuleName      = $target.Name
             ModuleVersion   = $target.Version
             ModuleBase      = $target.ModuleBase
@@ -347,5 +354,14 @@ function Get-PSModuleDependencyGraph {
                 AmbiguousEdgeCount = @($edges | Where-Object { $_.Resolution -eq 'Ambiguous' }).Count
             }
         }
+
+        if ($Show) {
+            $tempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+            $reportPath = Join-Path (Join-Path $tempRoot 'PSModuleDependencyGraph') "$($graph.ModuleName).html"
+            $report = $graph | Save-PSModuleDependencyGraphHtml -Path $reportPath
+            Start-Process -FilePath $report.FullName
+        }
+
+        $graph
     }
 }

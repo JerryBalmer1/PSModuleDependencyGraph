@@ -11,8 +11,9 @@ Describe 'PSModuleDependencyGraph module' {
         @($manifest.CompatiblePSEditions) | Should -Be @('Core')
     }
 
-    It 'exports only Get-PSModuleDependencyGraph' {
-        @((Get-Module PSModuleDependencyGraph).ExportedFunctions.Keys) | Should -Be @('Get-PSModuleDependencyGraph')
+    It 'exports Get-PSModuleDependencyGraph and Save-PSModuleDependencyGraphHtml only' {
+        @((Get-Module PSModuleDependencyGraph).ExportedFunctions.Keys | Sort-Object) |
+            Should -Be @('Get-PSModuleDependencyGraph', 'Save-PSModuleDependencyGraphHtml')
     }
 
     It 'turns on PSNativeCommandUseErrorActionPreference for its functions' {
@@ -28,8 +29,8 @@ Describe 'PSModuleDependencyGraph module' {
         } | Should -Throw
     }
 
-    It 'returns a dependency graph object' {
+    It 'returns a ModuleDependencyGraph' {
         $graph = Get-FixtureGraph 'ScriptModule/ImplicitExport'
-        $graph.PSObject.TypeNames | Should -Contain 'PSModuleDependencyGraph.DependencyGraph'
+        $graph.GetType().Name | Should -Be 'ModuleDependencyGraph'
     }
 }
