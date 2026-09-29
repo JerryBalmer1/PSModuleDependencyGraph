@@ -88,12 +88,16 @@ function Assert-GraphHtmlConfig {
     foreach ($key in 'Background', 'Panel', 'PanelAlt', 'Border', 'Text', 'TextDim', 'Accent') {
         if ($Config.Theme[$key] -notmatch $hex) { $problems.Add("Theme.$key must be a #rrggbb colour; got '$($Config.Theme[$key])'.") }
     }
-    foreach ($key in 'Color', 'AmbiguousColor', 'UnresolvedColor', 'InheritsColor') {
+    foreach ($key in 'Color', 'AmbiguousColor', 'ExternalColor', 'InheritsColor', 'OutputsColor') {
         if ($Config.Edges[$key] -notmatch $hex) { $problems.Add("Edges.$key must be a #rrggbb colour; got '$($Config.Edges[$key])'.") }
     }
     foreach ($group in @($Config.NodeGroups)) {
         if (-not $group.Name) { $problems.Add('Every NodeGroups entry needs a Name.'); continue }
         if ($group.Color -notmatch $hex) { $problems.Add("NodeGroups '$($group.Name)'.Color must be a #rrggbb colour; got '$($group.Color)'.") }
+    }
+    $groupNames = @($Config.NodeGroups | ForEach-Object { $_.Name })
+    foreach ($type in @($Config.Show.Types)) {
+        if ($type -notin $groupNames) { $problems.Add("Show.Types names '$type', which is not a NodeGroups Name.") }
     }
     if ($Config.Layout.Direction -notin 'LeftToRight', 'TopToBottom') {
         $problems.Add("Layout.Direction must be LeftToRight or TopToBottom; got '$($Config.Layout.Direction)'.")
@@ -108,7 +112,7 @@ function Assert-GraphHtmlConfig {
     foreach ($item in @($Config.NodeMenu)) {
         if (-not $item.Label -or -not $item.Target) { $problems.Add('Every NodeMenu entry needs a Label and a Target.'); continue }
         if ($item.Action -notin 'Open', 'Copy') { $problems.Add("NodeMenu '$($item.Label)'.Action must be Open or Copy; got '$($item.Action)'.") }
-        if ($item.When -and $item.When -notin 'Always', 'HasFile') { $problems.Add("NodeMenu '$($item.Label)'.When must be Always or HasFile; got '$($item.When)'.") }
+        if ($item.When -and $item.When -notin 'Always', 'HasFile', 'HasModule') { $problems.Add("NodeMenu '$($item.Label)'.When must be Always, HasFile or HasModule; got '$($item.When)'.") }
     }
 
     if ($problems.Count) {

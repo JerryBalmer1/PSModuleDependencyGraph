@@ -15,6 +15,7 @@ Describe 'StandardModule: Public / Private directories' {
             @{ Name = 'Write-SomethingStore'; Expected = $false }
             @{ Name = 'ConvertTo-SomethingObject'; Expected = $false }
             @{ Name = 'Remove-SomethingCache'; Expected = $false }
+            @{ Name = 'Get-SomethingKind'; Expected = $false }
         ) {
             $node = Get-FunctionNode $graph $Name
             $node.IsExported | Should -Be $Expected
@@ -23,6 +24,7 @@ Describe 'StandardModule: Public / Private directories' {
 
         It 'links public functions to the private ones they call' {
             Get-EdgePair $graph | Should -Be @(
+                'ConvertTo-SomethingObject->Get-SomethingKind'
                 'Get-Something->ConvertTo-SomethingObject'
                 'Get-Something->Read-SomethingStore'
                 'Set-Something->Write-SomethingStore'

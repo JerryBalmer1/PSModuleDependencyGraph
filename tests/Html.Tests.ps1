@@ -46,15 +46,16 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
             $html | Should -Not -Match '<script[^>]+src='
         }
 
-        It 'embeds one node per graph node, plus one per unresolved command' {
-            @($data.nodes | Where-Object group -NE 'unresolved').Count | Should -Be $graph.Nodes.Count
-            @($data.nodes | Where-Object group -EQ 'unresolved').label | Sort-Object |
-                Should -Be @('Get-ChildItem', 'Get-SomethingCache', 'Join-Path', 'Test-SomethingValid')
+        It 'embeds exactly the graph''s nodes and edges, external commands included' {
+            $data.nodes.Count | Should -Be $graph.Nodes.Count
+            $data.edges.Count | Should -Be $graph.Edges.Count
+            @($data.nodes | Where-Object group -EQ 'external').label | Sort-Object |
+                Should -Be (Get-ExternalCommandName $graph)
         }
 
-        It 'embeds one edge per graph edge, plus one per unresolved call' {
-            @($data.edges | Where-Object kind -NE 'Unresolved').Count | Should -Be $graph.Edges.Count
-            @($data.edges | Where-Object kind -EQ 'Unresolved').Count | Should -Be 4
+        It 'embeds the module list for the Modules panel' {
+            @($data.modules.name) | Should -Be @($graph.Modules.Name)
+            ($data.modules | Where-Object name -EQ 'SqlServer').installed | Should -BeFalse
         }
 
         It 'gives every edge both ends, each pointing at a node in the page' {
@@ -68,8 +69,10 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
         It 'puts <Label> in the <Group> group' -ForEach @(
             @{ Label = 'Get-Something'; Group = 'public' }
             @{ Label = 'Read-SomethingStore'; Group = 'private' }
-            @{ Label = 'Remove-SomethingCache'; Group = 'dangling' }
-            @{ Label = 'Test-SomethingValid'; Group = 'unresolved' }
+            @{ Label = 'Remove-SomethingCache'; Group = 'unresolved' }
+            @{ Label = 'Get-ChildItem'; Group = 'external' }
+            @{ Label = 'SomethingRecord'; Group = 'class' }
+            @{ Label = 'SomethingKind'; Group = 'enum' }
             @{ Label = '<script> ManifestExport.psm1'; Group = 'script' }
         ) {
             $byLabel[$Label].group | Should -Be $Group
@@ -87,6 +90,14 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
             $set.endLine | Should -Be 29
             @($set.parameterSets.name) | Should -Be @('ByValue', 'ByInputObject')
             $set.exampleCount | Should -Be 1
+            $set.cmdletBinding | Should -BeTrue
+        }
+
+        It 'carries modules for external commands and output types for functions and classes' {
+            $byLabel['Get-ChildItem'].moduleName | Should -Be 'Microsoft.PowerShell.Management'
+            $byLabel['Get-SomethingCache'].found | Should -BeFalse
+            $byLabel['ConvertTo-SomethingObject'].undeclaredOutputType | Should -Be @('SomethingRecord')
+            $byLabel['SomethingRecord'].undeclaredOutputBy | Should -Be @('ConvertTo-SomethingObject')
         }
 
         It 'writes paths relative to the module, with the module folder carried once for the right-click menu' {
@@ -105,13 +116,16 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
             $defaults = Import-PowerShellDataFile (Join-Path $RepoRoot 'src/PSModuleDependencyGraph/Resources/GraphHtmlConfig.psd1')
         }
 
-        It 'embeds the defaults: a colour for public, one for private, red for unresolved' {
+        It 'embeds the defaults: cyan public, blue private, magenta external, red unresolved' {
             $file = $graph | Save-PSModuleDependencyGraphHtml -Path (Join-Path $TestDrive 'defaults.html')
             $config = Get-EmbeddedJson ([System.IO.File]::ReadAllText($file.FullName)) 'graph-config' | ConvertFrom-Json
             $colour = @{}
             foreach ($g in $config.NodeGroups) { $colour[$g.Name] = $g.Color }
-            $colour['public'] | Should -Not -Be $colour['private']
+            $colour['public'] | Should -Be '#22d3ee'
+            $colour['private'] | Should -Be '#3b82f6'
+            $colour['external'] | Should -Be '#e040fb'
             $colour['unresolved'] | Should -Be '#ff4d4f'
+            $config.Show.Types | Should -Be @('public', 'private', 'unresolved', 'external', 'class', 'enum', 'script')
             $config.Theme.Background | Should -Be $defaults.Theme.Background
             $config.Layout.LeftToRight.LevelSeparation | Should -Be $defaults.Layout.LeftToRight.LevelSeparation
         }
@@ -131,8 +145,8 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
             $config.Theme.Background | Should -Be '#000000'
             $config.Theme.Panel | Should -Be $defaults.Theme.Panel
             ($config.NodeGroups | Where-Object Name -EQ 'public').Color | Should -Be '#00ff00'
-            ($config.NodeGroups | Where-Object Name -EQ 'public').Label | Should -Be 'Public (exported)'
-            ($config.NodeGroups | Where-Object Name -EQ 'private').Color | Should -Be '#8a96a8'
+            ($config.NodeGroups | Where-Object Name -EQ 'public').Label | Should -Be 'Public'
+            ($config.NodeGroups | Where-Object Name -EQ 'private').Color | Should -Be '#3b82f6'
             @($config.NodeGroups).Count | Should -Be $defaults.NodeGroups.Count
             $config.Layout.LeftToRight.NodeSpacing | Should -Be 90
             $config.Layout.LeftToRight.LevelSeparation | Should -Be $defaults.Layout.LeftToRight.LevelSeparation
@@ -140,9 +154,9 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
 
         It 'refuses a config with a bad value, naming the key' {
             $bad = Join-Path $TestDrive 'bad.psd1'
-            Set-Content -LiteralPath $bad -Value "@{ NodeGroups = @( @{ Name = 'private'; Color = 'grey' } ); Layout = @{ Direction = 'Sideways' } }"
+            Set-Content -LiteralPath $bad -Value "@{ NodeGroups = @( @{ Name = 'private'; Color = 'grey' } ); Show = @{ Types = @('public', 'nonsense') }; Layout = @{ Direction = 'Sideways' } }"
             { $graph | Save-PSModuleDependencyGraphHtml -Path (Join-Path $TestDrive 'bad.html') -ConfigPath $bad } |
-                Should -Throw -ExpectedMessage "*NodeGroups 'private'.Color*Layout.Direction*"
+                Should -Throw -ExpectedMessage "*NodeGroups 'private'.Color*Show.Types names 'nonsense'*Layout.Direction*"
         }
 
         It 'refuses a config file that does not exist' {
@@ -154,6 +168,7 @@ Describe 'Save-PSModuleDependencyGraphHtml' {
             $defaults.NodeMenu.Count | Should -BeGreaterThan 1
             $defaults.NodeMenu[0].Label | Should -Be 'Show in VS Code'
             $defaults.NodeMenu[0].Target | Should -Be 'vscode://file/{fileUrlPath}:{startLine}'
+            ($defaults.NodeMenu | Where-Object Label -EQ 'Copy module name').When | Should -Be 'HasModule'
         }
     }
 

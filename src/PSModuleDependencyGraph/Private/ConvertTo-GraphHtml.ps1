@@ -56,12 +56,14 @@ function ConvertTo-GraphHtml {
 function ConvertTo-GraphHtmlData {
     <#
     .SYNOPSIS
-        Shapes a dependency graph into the nodes and edges the HTML page draws.
+        Shapes a dependency graph into what the HTML page draws.
     .DESCRIPTION
-        Each node is given a group name - public, private, dangling, script,
-        class, enum or unresolved - and the page's config decides how each group
-        looks. One edge per graph edge, both ends pointing at a node that is in
-        the payload.
+        Every node goes in with its Type as its group - public, private,
+        unresolved, external, class, enum or script - and the page's config
+        decides how each group looks. External commands are nodes of the graph
+        already, with their module, so the page draws what the graph holds and
+        works nothing out for itself. The module list feeds the page's Modules
+        panel.
 
         Paths are relative to the module, and the module's own folder is carried
         once, as meta.rootPath, for the right-click menu to build full paths from.
@@ -76,110 +78,73 @@ function ConvertTo-GraphHtmlData {
     $moduleBase = $Graph.ModuleBase
     $nodeIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 
-    $nodes = [System.Collections.Generic.List[object]]::new()
-    foreach ($node in $Graph.Nodes) {
-        $group = switch ($node.Kind) {
-            'Function' {
-                if ($node.IsExported) { 'public' } elseif ($node.IsDangling) { 'dangling' } else { 'private' }
-            }
-            'Script' { 'script' }
-            'Class' { 'class' }
-            'Enum' { 'enum' }
-        }
-        $kindLabel = switch ($group) {
-            'public' { 'Public function' }
-            'private' { 'Private function' }
-            'dangling' { 'Private function, never called' }
-            'script' { 'Top-level script code' }
-            default { [string]$node.Kind }
-        }
-        $label = if ($node.Kind -eq 'Script') { "<script> $(Split-Path -Path $node.Path -Leaf)" } else { $node.Name }
-
+    $nodes = foreach ($node in $Graph.Nodes) {
         [void]$nodeIds.Add($node.Id)
-        $nodes.Add([ordered]@{
-                id              = $node.Id
-                label           = $label
-                name            = $node.Name
-                kind            = [string]$node.Kind
-                kindLabel       = $kindLabel
-                group           = $group
-                exported        = [bool]$node.IsExported
-                dangling        = [bool]$node.IsDangling
-                exportState     = $node.ExportState
-                exportSource    = $node.ExportSource
-                path            = if ($node.Path) { Get-RelativePathSafe -BasePath $moduleBase -TargetPath $node.Path } else { $null }
-                startLine       = $node.StartLine
-                endLine         = $node.EndLine
-                unresolvedCalls = @($node.UnresolvedCalls)
-                synopsis        = if ($node.Help) { $node.Help.Synopsis } else { $null }
-                exampleCount    = if ($node.Help) { @($node.Help.Examples).Count } else { 0 }
-                parameterSets   = @(
-                    foreach ($set in $node.ParameterSets) {
-                        [ordered]@{
-                            name       = $set.Name
-                            isDefault  = [bool]$set.IsDefault
-                            parameters = @($set.Parameters | ForEach-Object {
-                                    [ordered]@{ name = $_.Name; type = $_.TypeName; mandatory = [bool]$_.Mandatory }
-                                })
-                        }
+        [ordered]@{
+            id                   = $node.Id
+            label                = if ($node.Kind -eq 'Script') { "<script> $(Split-Path -Path $node.Path -Leaf)" } else { $node.Name }
+            name                 = $node.Name
+            kind                 = $node.Kind
+            type                 = $node.Type
+            group                = $node.Type.ToLowerInvariant()
+            exported             = [bool]$node.IsExported
+            exportState          = $node.ExportState
+            exportSource         = $node.ExportSource
+            path                 = if ($node.Path) { Get-RelativePathSafe -BasePath $moduleBase -TargetPath $node.Path } else { $null }
+            startLine            = $node.StartLine
+            endLine              = $node.EndLine
+            cmdletBinding        = [bool]$node.CmdletBinding
+            synopsis             = if ($node.Help) { $node.Help.Synopsis } else { $null }
+            exampleCount         = if ($node.Help) { @($node.Help.Examples).Count } else { 0 }
+            parameterSets        = @(
+                foreach ($set in $node.ParameterSets) {
+                    [ordered]@{
+                        name       = $set.Name
+                        isDefault  = [bool]$set.IsDefault
+                        parameters = @($set.Parameters | ForEach-Object {
+                                [ordered]@{ name = $_.Name; type = $_.TypeName; mandatory = [bool]$_.Mandatory }
+                            })
                     }
-                )
-            })
-    }
-
-    $edges = [System.Collections.Generic.List[object]]::new()
-    foreach ($edge in $Graph.Edges) {
-        if (-not ($nodeIds.Contains($edge.Source) -and $nodeIds.Contains($edge.Target))) { continue }
-        $edges.Add([ordered]@{
-                from       = $edge.Source
-                to         = $edge.Target
-                kind       = [string]$edge.Kind
-                resolution = [string]$edge.Resolution
-                candidates = $edge.TargetCandidates
-            })
-    }
-
-    # Commands the module calls but does not define: one node per name, joined
-    # to each caller. Manifest RequiredModules and using-module entries have no
-    # calling node and are left out.
-    $unresolvedIds = @{}
-    foreach ($ref in $Graph.Unresolved) {
-        if (-not $nodeIds.Contains([string]$ref.Source)) { continue }
-
-        $key = ([string]$ref.TargetName).ToLowerInvariant()
-        if (-not $unresolvedIds.ContainsKey($key)) {
-            $unresolvedIds[$key] = "unresolved:$key"
-            $nodes.Add([ordered]@{
-                    id              = $unresolvedIds[$key]
-                    label           = [string]$ref.TargetName
-                    name            = [string]$ref.TargetName
-                    kind            = 'Unresolved'
-                    kindLabel       = 'Unresolved command'
-                    group           = 'unresolved'
-                    exported        = $false
-                    dangling        = $false
-                    exportState     = $null
-                    exportSource    = $null
-                    path            = $null
-                    startLine       = $null
-                    endLine         = $null
-                    unresolvedCalls = @()
-                    synopsis        = $null
-                    exampleCount    = 0
-                    parameterSets   = @()
-                })
+                }
+            )
+            outputType           = @($node.OutputType)
+            inferredOutputType   = @($node.InferredOutputType)
+            undeclaredOutputType = @($node.UndeclaredOutputType)
+            outputBy             = @($node.OutputBy)
+            undeclaredOutputBy   = @($node.UndeclaredOutputBy)
+            moduleName           = $node.ModuleName
+            moduleVersion        = if ($node.ModuleVersion) { [string]$node.ModuleVersion } else { $null }
+            commandType          = $node.CommandType
+            resolvesTo           = $node.ResolvesTo
+            found                = [bool]$node.IsFound
         }
-        $edges.Add([ordered]@{
-                from       = $ref.Source
-                to         = $unresolvedIds[$key]
-                kind       = 'Unresolved'
-                resolution = 'Unresolved'
-                candidates = 0
-            })
+    }
+
+    $edges = foreach ($edge in $Graph.Edges) {
+        if (-not ($nodeIds.Contains($edge.Source) -and $nodeIds.Contains($edge.Target))) { continue }
+        [ordered]@{
+            from       = $edge.Source
+            to         = $edge.Target
+            kind       = $edge.Kind
+            resolution = $edge.Resolution
+            candidates = $edge.TargetCandidates
+            isDeclared = $edge.IsDeclared
+        }
+    }
+
+    $modules = foreach ($module in $Graph.Modules) {
+        [ordered]@{
+            name        = $module.Name
+            version     = $module.Version
+            installed   = [bool]$module.IsInstalled
+            declaredBy  = @($module.DeclaredBy)
+            commands    = @($module.Commands)
+            usedBy      = @($module.UsedBy)
+        }
     }
 
     [ordered]@{
-        meta  = [ordered]@{
+        meta    = [ordered]@{
             moduleName  = $Graph.ModuleName
             version     = if ($Graph.ModuleVersion) { $Graph.ModuleVersion.ToString() } else { $null }
             rootPath    = $moduleBase
@@ -187,7 +152,8 @@ function ConvertTo-GraphHtmlData {
             generatedAt = (Get-Date).ToString('o')
             stats       = $Graph.Stats
         }
-        nodes = @($nodes)
-        edges = @($edges)
+        nodes   = @($nodes)
+        edges   = @($edges)
+        modules = @($modules)
     }
 }

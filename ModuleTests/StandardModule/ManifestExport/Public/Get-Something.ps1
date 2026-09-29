@@ -12,6 +12,7 @@ function Get-Something {
         Get-Something -Id 7
     #>
     [CmdletBinding(DefaultParameterSetName = 'ByName')]
+    [OutputType([SomethingRecord])]
     param(
         [Parameter(Mandatory, ParameterSetName = 'ByName', Position = 0)]
         [string] $Name,

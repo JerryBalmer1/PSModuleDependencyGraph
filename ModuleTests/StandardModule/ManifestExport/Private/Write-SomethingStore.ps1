@@ -1,4 +1,5 @@
 function Write-SomethingStore {
     param($Value)
-    $Value
+    $query = "INSERT INTO Something (Value) VALUES ('$Value')" | ConvertTo-Json
+    SqlServer\Invoke-Sqlcmd -Query $query
 }

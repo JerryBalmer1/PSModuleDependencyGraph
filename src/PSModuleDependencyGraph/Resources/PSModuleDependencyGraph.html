@@ -48,14 +48,12 @@ header h1 { margin: 0; font-size: 15px; font-weight: 600; }
 header .version { color: var(--fg-dim); font-size: 12px; }
 header .counts { margin-left: auto; display: flex; flex-wrap: wrap; gap: 14px; color: var(--fg-dim); font-size: 12px; }
 header .counts b { color: var(--fg); font-weight: 600; }
-header .counts a { color: inherit; cursor: pointer; text-decoration: none; }
-header .counts a:hover b { text-decoration: underline; }
 
 #main { flex: 1 1 auto; display: flex; min-height: 0; }
 
 #sidebar {
-    flex: 0 0 310px;
-    width: 310px;
+    flex: 0 0 320px;
+    width: 320px;
     overflow-y: auto;
     background: var(--panel);
     border-right: 1px solid var(--line);
@@ -83,8 +81,6 @@ input[type=search], select {
 }
 input[type=search]:focus, select:focus { outline: 1px solid var(--accent); }
 
-label.check { display: flex; align-items: center; gap: 6px; margin-top: 6px; cursor: pointer; }
-
 .buttons { display: flex; gap: 6px; margin-top: 8px; }
 button {
     flex: 1 1 auto;
@@ -98,10 +94,18 @@ button {
 }
 button:hover { border-color: var(--accent); }
 
-.legend { display: grid; grid-template-columns: 14px 1fr; gap: 6px 8px; align-items: center; }
-.swatch { width: 14px; height: 10px; border-radius: 2px; }
+/* One row per node type and per module: box, swatch, name, count. */
+.toggle-row { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
+.toggle-row input { margin: 0; }
+.toggle-row .name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toggle-row .name.link { cursor: pointer; }
+.toggle-row .name.link:hover { color: var(--accent); }
+.toggle-row .count { color: var(--fg-dim); font-size: 12px; }
+.toggle-row .tag { font-size: 11px; color: #ff9f7f; border: 1px solid #ff9f7f55; border-radius: 3px; padding: 0 4px; }
+.swatch { flex: 0 0 14px; width: 14px; height: 10px; border-radius: 2px; }
 .swatch.line { height: 0; border-top: 2px solid; border-radius: 0; }
 .swatch.dashed { border-top-style: dashed; }
+.edge-legend { display: grid; grid-template-columns: 14px 1fr; gap: 6px 8px; align-items: center; margin-top: 10px; }
 
 .hint { margin: 0 0 6px; color: var(--fg-dim); }
 .warn { color: #f2c14e; }
@@ -190,24 +194,23 @@ div.vis-tooltip {
     <header>
         <h1 id="hdr-title">{{TITLE}}</h1>
         <span class="version" id="hdr-version"></span>
-        <span class="counts">
-            <span><b id="c-public">0</b> public</span>
-            <span><b id="c-private">0</b> private</span>
-            <a id="c-dangling-link" title="Select the private functions nothing calls"><b id="c-dangling">0</b> never called</a>
-            <span><b id="c-edges">0</b> calls</span>
-            <span><b id="c-unresolved">0</b> unresolved</span>
-        </span>
+        <span class="counts" id="hdr-counts"></span>
     </header>
     <div id="main">
         <aside id="sidebar">
             <div class="section">
                 <h2>Find</h2>
-                <input type="search" id="search" placeholder="Function name" autocomplete="off">
+                <input type="search" id="search" placeholder="Name" autocomplete="off">
             </div>
             <div class="section">
                 <h2>Show</h2>
-                <label class="check"><input type="checkbox" id="exported-only"> Public only</label>
-                <label class="check" id="unresolved-wrap" hidden><input type="checkbox" id="show-unresolved"> Unresolved commands</label>
+                <div id="type-toggles"></div>
+                <div class="edge-legend" id="edge-legend"></div>
+            </div>
+            <div class="section" id="modules-section" hidden>
+                <h2>Modules</h2>
+                <p class="hint">Modules this code depends on. Untick one to hide its commands; click its name to select them and their callers.</p>
+                <div id="module-toggles"></div>
             </div>
             <div class="section">
                 <h2>Layout</h2>
@@ -219,15 +222,6 @@ div.vis-tooltip {
                     <button type="button" id="fit">Fit</button>
                     <button type="button" id="relayout">Re-layout</button>
                 </div>
-            </div>
-            <div class="section">
-                <h2>Legend</h2>
-                <div class="legend" id="legend"></div>
-            </div>
-            <div class="section" id="dangling-section" hidden>
-                <h2>Never called</h2>
-                <p class="hint">Private functions nothing in the module calls.</p>
-                <ul class="links" id="dangling-list"></ul>
             </div>
             <div class="section">
                 <h2>Details</h2>
@@ -259,6 +253,7 @@ div.vis-tooltip {
     const data = JSON.parse(document.getElementById('graph-data').textContent);
     const config = JSON.parse(document.getElementById('graph-config').textContent);
     const meta = data.meta;
+    const NO_MODULE = '(no module found)';
 
     // ---- Theme ------------------------------------------------------------
     const theme = config.Theme;
@@ -278,9 +273,11 @@ div.vis-tooltip {
         return '#' + a.map((v, i) => Math.round(v * amount + b[i] * (1 - amount))
             .toString(16).padStart(2, '0')).join('');
     }
+    const escapeHtml = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-    // ---- Groups: how each kind of node is drawn, from the config --------------
+    // ---- Groups: how each node Type is drawn, from the config -----------------
     const fill = config.Nodes.FillStrength;
+    const groupByName = Object.fromEntries(config.NodeGroups.map(g => [g.Name, g]));
     const visGroups = {};
     for (const g of config.NodeGroups) {
         visGroups[g.Name] = {
@@ -297,47 +294,61 @@ div.vis-tooltip {
 
     // ---- Data -------------------------------------------------------------
     const lines = n => n.startLine ? (n.endLine && n.endLine !== n.startLine ? n.startLine + '-' + n.endLine : String(n.startLine)) : '';
-    const nodes = new vis.DataSet(data.nodes.map(n => ({
-        id: n.id,
-        label: n.label,
-        group: n.group,
-        title: [n.label, n.kindLabel, n.path ? n.path + ':' + lines(n) : null, n.synopsis]
-            .filter(Boolean).join('\n'),
-        raw: n
-    })));
+    const moduleOf = n => n.kind === 'Command' ? (n.moduleName || NO_MODULE) : null;
+    const nodes = new vis.DataSet(data.nodes.map(n => {
+        const node = {
+            id: n.id,
+            label: n.label,
+            group: n.group,
+            title: [n.label, n.type + (n.kind === 'Function' ? (n.cmdletBinding ? ' (CmdletBinding)' : ' (no CmdletBinding)') : ''),
+                n.path ? n.path + ':' + lines(n) : null,
+                n.kind === 'Command' ? (n.moduleName || '') + (n.moduleVersion ? ' ' + n.moduleVersion : '') : null,
+                n.synopsis].filter(Boolean).join('\n'),
+            raw: n
+        };
+        // External commands carry their module under the name; one not found
+        // on this machine is dashed.
+        if (n.kind === 'Command') {
+            const second = n.found ? (n.moduleName || n.commandType || '') : (n.moduleName ? n.moduleName + ', ' : '') + config.Nodes.NotFoundText;
+            node.label = escapeHtml(n.label) + (second ? '\n<i>' + escapeHtml(second) + '</i>' : '');
+            node.font = { multi: 'html', ital: { color: theme.TextDim, size: Math.max(9, theme.FontSize - 2) } };
+            if (!n.found) { node.shapeProperties = { borderDashes: [4, 3] }; }
+        }
+        return node;
+    }));
 
-    const edgeColor = e => e.resolution === 'Ambiguous' ? config.Edges.AmbiguousColor
-        : e.kind === 'Unresolved' ? config.Edges.UnresolvedColor
-        : e.kind === 'Inherits' ? config.Edges.InheritsColor
-        : null;
+    const edgeStyle = e => {
+        if (e.resolution === 'Ambiguous') { return { color: config.Edges.AmbiguousColor, dashes: true }; }
+        if (e.resolution === 'External') { return { color: config.Edges.ExternalColor, dashes: true }; }
+        if (e.kind === 'Inherits') { return { color: config.Edges.InheritsColor, dashes: false }; }
+        if (e.kind === 'Outputs') { return { color: config.Edges.OutputsColor, dashes: e.isDeclared ? false : [2, 4] }; }
+        return { color: null, dashes: false };
+    };
     const edges = new vis.DataSet(data.edges.map((e, i) => {
-        const c = edgeColor(e);
+        const style = edgeStyle(e);
         return {
             id: 'e' + i,
             from: e.from,
             to: e.to,
-            dashes: e.resolution === 'Ambiguous' || e.kind === 'Unresolved',
-            color: c ? { color: c, highlight: c, hover: c } : undefined,
-            arrows: { to: { enabled: true, scaleFactor: config.Edges.ArrowScale, type: e.kind === 'Inherits' ? 'triangle' : 'arrow' } },
+            dashes: style.dashes,
+            color: style.color ? { color: style.color, highlight: style.color, hover: style.color } : undefined,
+            arrows: { to: { enabled: true, scaleFactor: config.Edges.ArrowScale, type: e.kind === 'Inherits' ? 'triangle' : (e.kind === 'Outputs' ? 'diamond' : 'arrow') } },
             title: e.kind === 'Inherits' ? 'inherits'
-                : e.kind === 'Unresolved' ? 'calls a command this module does not define'
+                : e.kind === 'Outputs' ? (e.isDeclared ? 'outputs (declared in [OutputType()])' : 'outputs, not declared in [OutputType()]')
+                : e.resolution === 'External' ? 'calls a command from outside the module'
                 : e.resolution === 'Ambiguous' ? 'calls (ambiguous: ' + e.candidates + ' definitions share this name)'
                 : 'calls',
             raw: e
         };
     }));
 
-    const filters = { exportedOnly: !!config.Show.ExportedOnly, showUnresolved: !!config.Show.Unresolved };
+    // What is visible: node types and, for external commands, their modules.
+    const shownTypes = new Set(config.Show.Types);
+    const hiddenModules = new Set();
     const nodeView = new vis.DataView(nodes, {
-        filter: n => {
-            if (n.group === 'unresolved') { return filters.showUnresolved; }
-            if (filters.exportedOnly && n.raw.kind === 'Function' && !n.raw.exported) { return false; }
-            return true;
-        }
+        filter: n => shownTypes.has(n.group) && !(n.raw.kind === 'Command' && hiddenModules.has(moduleOf(n.raw)))
     });
-    const edgeView = new vis.DataView(edges, {
-        filter: e => e.raw.kind !== 'Unresolved' || filters.showUnresolved
-    });
+    const edgeView = new vis.DataView(edges);
 
     // ---- Layout -----------------------------------------------------------
     // The layered layout places every node itself, callers before callees, so
@@ -431,56 +442,141 @@ div.vis-tooltip {
             hideLoading();
         });
     }
+    function refreshView() {
+        nodeView.refresh();
+        edgeView.refresh();
+        relayout();
+    }
+    function selectNodes(ids) {
+        const visible = ids.filter(id => nodeView.get(id));
+        network.selectNodes(visible);
+        if (visible.length) { network.fit({ nodes: visible, animation: { duration: 300 } }); }
+    }
 
     // ---- Header -----------------------------------------------------------
-    const functionNodes = data.nodes.filter(n => n.kind === 'Function');
-    const danglingNodes = functionNodes.filter(n => n.dangling);
+    const countOf = group => data.nodes.filter(n => n.group === group).length;
+    const counts = document.getElementById('hdr-counts');
     document.getElementById('hdr-version').textContent = meta.version ? 'v' + meta.version : '';
-    document.getElementById('c-public').textContent = functionNodes.filter(n => n.exported).length;
-    document.getElementById('c-private').textContent = functionNodes.filter(n => !n.exported).length;
-    document.getElementById('c-dangling').textContent = danglingNodes.length;
-    document.getElementById('c-edges').textContent = data.edges.filter(e => e.kind !== 'Unresolved').length;
-    document.getElementById('c-unresolved').textContent = data.nodes.filter(n => n.group === 'unresolved').length;
-    document.getElementById('c-dangling-link').addEventListener('click', () => {
-        const ids = danglingNodes.map(n => n.id);
-        network.selectNodes(ids);
-        if (ids.length) { network.fit({ nodes: ids, animation: { duration: 300 } }); }
-    });
+    for (const [text, value] of [
+        ['public', countOf('public')], ['private', countOf('private')], ['unresolved', countOf('unresolved')],
+        ['external', countOf('external')], ['modules', data.modules.length]]) {
+        const span = document.createElement('span');
+        const b = document.createElement('b');
+        b.textContent = value;
+        span.append(b, ' ' + text);
+        counts.append(span);
+    }
 
-    // ---- Legend -----------------------------------------------------------
-    const legend = document.getElementById('legend');
-    const present = new Set(data.nodes.map(n => n.group));
-    function legendRow(swatchClass, style, text) {
+    // ---- Show: one box per node Type ---------------------------------------
+    function toggleRow(parent, { checked, swatchStyle, name, count, tag, onToggle, onName }) {
+        const row = document.createElement('label');
+        row.className = 'toggle-row';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = checked;
+        box.addEventListener('change', () => onToggle(box.checked));
+        const swatch = document.createElement('span');
+        swatch.className = 'swatch';
+        Object.assign(swatch.style, swatchStyle);
+        const label = document.createElement('span');
+        label.className = 'name' + (onName ? ' link' : '');
+        label.textContent = name;
+        label.title = name;
+        if (onName) {
+            label.addEventListener('click', ev => { ev.preventDefault(); onName(); });
+        }
+        const n = document.createElement('span');
+        n.className = 'count';
+        n.textContent = count;
+        row.append(box, swatch, label);
+        if (tag) {
+            const t = document.createElement('span');
+            t.className = 'tag';
+            t.textContent = tag;
+            row.append(t);
+        }
+        row.append(n);
+        parent.append(row);
+    }
+
+    const typeToggles = document.getElementById('type-toggles');
+    for (const g of config.NodeGroups) {
+        const count = countOf(g.Name);
+        if (!count) { continue; }
+        toggleRow(typeToggles, {
+            checked: shownTypes.has(g.Name),
+            swatchStyle: { background: mix(g.Color, Math.min(1, fill * 1.6)), border: '1px ' + (g.Dashed ? 'dashed ' : 'solid ') + g.Color },
+            name: g.Label || g.Name,
+            count,
+            onToggle: on => { if (on) { shownTypes.add(g.Name); } else { shownTypes.delete(g.Name); } refreshView(); },
+            onName: () => selectNodes(data.nodes.filter(n => n.group === g.Name).map(n => n.id))
+        });
+    }
+
+    const edgeLegend = document.getElementById('edge-legend');
+    function edgeRow(color, dashed, text) {
         const s = document.createElement('span');
-        s.className = swatchClass;
-        Object.assign(s.style, style);
+        s.className = 'swatch line' + (dashed ? ' dashed' : '');
+        s.style.borderTopColor = color;
         const t = document.createElement('span');
         t.textContent = text;
-        legend.append(s, t);
+        edgeLegend.append(s, t);
     }
-    for (const g of config.NodeGroups) {
-        if (!present.has(g.Name)) { continue; }
-        legendRow('swatch', { background: mix(g.Color, Math.min(1, fill * 1.6)), border: '1px ' + (g.Dashed ? 'dashed ' : 'solid ') + g.Color }, g.Label || g.Name);
+    edgeRow(config.Edges.Color, false, 'Calls');
+    if (data.edges.some(e => e.resolution === 'External')) { edgeRow(config.Edges.ExternalColor, true, 'Calls an external command'); }
+    if (data.edges.some(e => e.resolution === 'Ambiguous')) { edgeRow(config.Edges.AmbiguousColor, true, 'Ambiguous call'); }
+    if (data.edges.some(e => e.kind === 'Outputs' && e.isDeclared)) { edgeRow(config.Edges.OutputsColor, false, 'Outputs (declared)'); }
+    if (data.edges.some(e => e.kind === 'Outputs' && !e.isDeclared)) { edgeRow(config.Edges.OutputsColor, true, 'Outputs, not in [OutputType()]'); }
+    if (data.edges.some(e => e.kind === 'Inherits')) { edgeRow(config.Edges.InheritsColor, false, 'Inherits'); }
+
+    // ---- Modules: what the code depends on ----------------------------------
+    const commandsByModule = new Map();
+    for (const n of data.nodes.filter(x => x.kind === 'Command')) {
+        const key = moduleOf(n);
+        if (!commandsByModule.has(key)) { commandsByModule.set(key, []); }
+        commandsByModule.get(key).push(n);
     }
-    legendRow('swatch line', { borderTopColor: config.Edges.Color }, 'Calls');
-    if (data.edges.some(e => e.resolution === 'Ambiguous')) {
-        legendRow('swatch line dashed', { borderTopColor: config.Edges.AmbiguousColor }, 'Ambiguous call');
-    }
-    if (data.edges.some(e => e.kind === 'Unresolved')) {
-        legendRow('swatch line dashed', { borderTopColor: config.Edges.UnresolvedColor }, 'Calls an unresolved command');
-    }
-    if (data.edges.some(e => e.kind === 'Inherits')) {
-        legendRow('swatch line', { borderTopColor: config.Edges.InheritsColor }, 'Inherits');
+    const moduleRows = data.modules.map(m => ({ name: m.name, version: m.version, installed: m.installed, declaredBy: m.declaredBy }));
+    if (commandsByModule.has(NO_MODULE)) { moduleRows.push({ name: NO_MODULE, version: null, installed: false, declaredBy: [] }); }
+    if (moduleRows.length) {
+        const moduleToggles = document.getElementById('module-toggles');
+        const externalColor = (groupByName.external || { Color: config.Edges.ExternalColor }).Color;
+        for (const m of moduleRows) {
+            const commands = commandsByModule.get(m.name) || [];
+            const selectModule = () => {
+                const ids = new Set();
+                for (const c of commands) {
+                    ids.add(c.id);
+                    edges.get({ filter: e => e.to === c.id }).forEach(e => ids.add(e.from));
+                }
+                for (const caller of (data.modules.find(x => x.name === m.name) || { usedBy: [] }).usedBy) {
+                    data.nodes.filter(n => n.name === caller && n.kind !== 'Command').forEach(n => ids.add(n.id));
+                }
+                selectNodes([...ids]);
+            };
+            toggleRow(moduleToggles, {
+                checked: true,
+                swatchStyle: { background: mix(externalColor, Math.min(1, fill * 1.6)), border: '1px ' + (m.installed ? 'solid ' : 'dashed ') + externalColor },
+                name: m.name + (m.version ? ' ' + m.version : ''),
+                count: commands.length,
+                tag: m.name === NO_MODULE ? null : (m.installed ? null : 'not installed'),
+                onToggle: on => { if (on) { hiddenModules.delete(m.name); } else { hiddenModules.add(m.name); } refreshView(); },
+                onName: selectModule
+            });
+        }
+        document.getElementById('modules-section').hidden = false;
     }
 
     // ---- Details panel ----------------------------------------------------
     const details = document.getElementById('details');
     const detailsEmpty = document.getElementById('details-empty');
+    const nodeIdByName = new Map();
+    for (const n of data.nodes) { if (!nodeIdByName.has(n.name)) { nodeIdByName.set(n.name, n.id); } }
     function nodeLink(id) {
         const n = nodes.get(id);
         const a = document.createElement('a');
         a.className = 'node-link';
-        a.textContent = n ? n.label : id;
+        a.textContent = n ? n.raw.label : id;
         a.addEventListener('click', () => focusNode(id));
         return a;
     }
@@ -495,6 +591,7 @@ div.vis-tooltip {
         }
         return ul;
     }
+    const namesToLinks = names => linkList(names.map(name => nodeIdByName.get(name)).filter(Boolean));
     function row(term, value, cssClass) {
         const dt = document.createElement('dt');
         dt.textContent = term;
@@ -524,10 +621,17 @@ div.vis-tooltip {
         if (!n) { details.hidden = true; detailsEmpty.hidden = false; return; }
         const r = n.raw;
         row('Name', r.name);
-        row('Kind', r.kindLabel, r.dangling ? 'warn' : null);
+        row('Type', (groupByName[r.group] || {}).Label || r.type, r.group === 'unresolved' ? 'warn' : null);
         if (r.kind === 'Function') {
+            row('CmdletBinding', r.cmdletBinding ? 'Yes (advanced function)' : 'No');
             row('Exported', r.exported ? 'Yes' : (r.exportState === 'NotApplicable' ? 'Not applicable (script)' : 'No'));
             row('Decided by', r.exportSource || '');
+        }
+        if (r.kind === 'Command') {
+            row('Module', r.moduleName || 'none found');
+            if (r.moduleVersion) { row('Version', r.moduleVersion); }
+            if (r.commandType) { row('Command type', r.commandType + (r.resolvesTo ? ' for ' + r.resolvesTo : '')); }
+            row('Found here', r.found ? 'Yes' : 'No', r.found ? null : 'warn');
         }
         if (r.path) { row('File', r.path); row('Lines', lines(r)); }
         if (r.synopsis) { row('Synopsis', r.synopsis); }
@@ -535,13 +639,21 @@ div.vis-tooltip {
             row('Parameter sets', parameterSetBlock(r.parameterSets));
             const short = r.exported && r.exampleCount < r.parameterSets.length;
             row('Examples', r.exampleCount + (short ? ' (fewer than its ' + r.parameterSets.length + ' parameter sets)' : ''), short ? 'warn' : null);
+            row('[OutputType()]', r.outputType.length ? r.outputType.join(', ') : 'none');
+            if (r.inferredOutputType.length) { row('Outputs', r.inferredOutputType.join(', ')); }
+            if (r.undeclaredOutputType.length) { row('Not declared', r.undeclaredOutputType.join(', '), 'warn'); }
         }
-        const out = [...new Set(edges.get({ filter: e => e.from === id && e.raw.kind !== 'Unresolved' }).map(e => e.to))];
+        if (r.kind === 'Class' || r.kind === 'Enum') {
+            row('Output by', namesToLinks(r.outputBy));
+            if (r.undeclaredOutputBy.length) { row('Not declared by', namesToLinks(r.undeclaredOutputBy), 'warn'); }
+        }
+        const out = [...new Set(edges.get({ filter: e => e.from === id && e.raw.kind !== 'Outputs' }).map(e => e.to))];
+        const internal = out.filter(t => nodes.get(t).raw.kind !== 'Command');
+        const external = out.filter(t => nodes.get(t).raw.kind === 'Command');
         const inc = [...new Set(edges.get({ filter: e => e.to === id && e.from !== id }).map(e => e.from))];
-        const unres = [...new Set(edges.get({ filter: e => e.from === id && e.raw.kind === 'Unresolved' }).map(e => e.to))];
-        if (r.kind !== 'Unresolved') { row('Calls', linkList(out)); }
-        row('Called by', linkList(inc));
-        if (unres.length) { row('Unresolved', linkList(unres)); }
+        if (r.kind !== 'Command') { row('Calls', linkList(internal)); }
+        if (external.length) { row('External', linkList(external)); }
+        row(r.kind === 'Class' || r.kind === 'Enum' ? 'Used by' : 'Called by', linkList(inc));
         details.hidden = false;
         detailsEmpty.hidden = true;
     }
@@ -556,17 +668,6 @@ div.vis-tooltip {
         if (p.nodes.length) { showDetails(p.nodes[0]); }
         else { details.hidden = true; detailsEmpty.hidden = false; }
     });
-
-    // ---- Never-called list --------------------------------------------------
-    if (danglingNodes.length) {
-        const list = document.getElementById('dangling-list');
-        for (const n of danglingNodes) {
-            const li = document.createElement('li');
-            li.append(nodeLink(n.id));
-            list.append(li);
-        }
-        document.getElementById('dangling-section').hidden = false;
-    }
 
     // ---- Right-click menu -------------------------------------------------
     // Built from config.NodeMenu, a list: each entry is a label, an action
@@ -587,6 +688,7 @@ div.vis-tooltip {
             .replace(/#/g, '%23').replace(/\?/g, '%3F');
         return {
             name: r.name || '',
+            module: r.moduleName || '',
             path: r.path || '',
             fullPath: full,
             fileUrlPath: urlPath,
@@ -621,6 +723,8 @@ div.vis-tooltip {
             a.remove();
         }
     }
+    const menuItemEnabled = (item, r) =>
+        item.When === 'HasFile' ? !!r.path : item.When === 'HasModule' ? !!r.moduleName : true;
     function hideMenu() { menu.hidden = true; }
     function showMenu(id, x, y) {
         const r = nodes.get(id).raw;
@@ -633,7 +737,7 @@ div.vis-tooltip {
             const button = document.createElement('button');
             button.type = 'button';
             button.textContent = item.Label;
-            button.disabled = item.When === 'HasFile' && !r.path;
+            button.disabled = !menuItemEnabled(item, r);
             button.addEventListener('click', () => { hideMenu(); runMenuItem(item, r); });
             menu.append(button);
         }
@@ -656,34 +760,15 @@ div.vis-tooltip {
     network.on('dragStart', hideMenu);
     network.on('zoom', hideMenu);
 
-    // ---- Sidebar controls -------------------------------------------------
+    // ---- Search and layout controls ---------------------------------------
     document.getElementById('search').addEventListener('input', ev => {
         const q = ev.target.value.trim().toLowerCase();
         if (!q) { network.unselectAll(); return; }
-        const hits = nodeView.getIds({ filter: n => n.label.toLowerCase().includes(q) });
+        const hits = nodeView.getIds({ filter: n => n.raw.label.toLowerCase().includes(q) });
         network.selectNodes(hits);
         if (hits.length) { network.fit({ nodes: hits, animation: { duration: 300 } }); }
         if (hits.length === 1) { showDetails(hits[0]); }
     });
-
-    const exportedOnly = document.getElementById('exported-only');
-    exportedOnly.checked = filters.exportedOnly;
-    exportedOnly.addEventListener('change', ev => {
-        filters.exportedOnly = ev.target.checked;
-        nodeView.refresh();
-        edgeView.refresh();
-    });
-    if (present.has('unresolved')) {
-        const showUnresolved = document.getElementById('show-unresolved');
-        showUnresolved.checked = filters.showUnresolved;
-        document.getElementById('unresolved-wrap').hidden = false;
-        showUnresolved.addEventListener('change', ev => {
-            filters.showUnresolved = ev.target.checked;
-            nodeView.refresh();
-            edgeView.refresh();
-            relayout();
-        });
-    }
     directionSelect.addEventListener('change', relayout);
     document.getElementById('fit').addEventListener('click', () => fitAll(true));
     document.getElementById('relayout').addEventListener('click', relayout);

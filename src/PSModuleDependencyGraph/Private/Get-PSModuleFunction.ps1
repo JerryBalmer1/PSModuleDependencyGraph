@@ -48,6 +48,15 @@ function Get-PSModuleFunction {
         }
 
         $definedNames = @($definitions | ForEach-Object { $_.Ast.Name })
+
+        # Classes and enums the module defines, so output types can be matched to them.
+        $moduleTypeNames = @(
+            foreach ($file in $parsedFiles) {
+                if (-not $file.Ast -or $file.Path -like '*.psd1') { continue }
+                $file.Ast.FindAll({ param($ast) $ast -is [System.Management.Automation.Language.TypeDefinitionAst] }, $true) |
+                    ForEach-Object Name
+            }
+        )
         $manifestData = Get-ManifestDataSafe -Target $target
         $exportPolicy = Get-FunctionExportPolicy -Target $target -ManifestData $manifestData -ParsedFiles $parsedFiles -DefinedFunctionNames $definedNames
 
@@ -59,6 +68,7 @@ function Get-PSModuleFunction {
 
             $signature = Get-FunctionSignature -FunctionAst $fn
             $help = Get-FunctionHelp -FunctionAst $fn
+            $outputType = Get-FunctionOutputType -FunctionAst $fn -ModuleTypeName $moduleTypeNames
 
             # Each parameter carries its .PARAMETER text, so a build can find
             # parameters nobody documented.
@@ -111,6 +121,8 @@ function Get-PSModuleFunction {
                 Parameters          = $signature.Parameters
                 ParameterSets       = $signature.ParameterSets
                 Help                = $help
+                OutputType          = $outputType.Declared
+                InferredOutputType  = $outputType.Inferred
                 Path            = $def.FilePath
                 StartLine       = $fn.Extent.StartLineNumber
                 StartColumn     = $fn.Extent.StartColumnNumber
