@@ -21,6 +21,7 @@ class ModuleDependencyGraph {
     [object[]] $Edges = @()
     [object[]] $Roots = @()
     [object[]] $Leaves = @()
+    [object[]] $Dangling = @()
     [object[]] $Unresolved = @()
     [string[]] $AmbiguousNames = @()
     [object[]] $Functions = @()

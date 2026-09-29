@@ -15,11 +15,35 @@ function Get-PSModuleDependencyGraph {
         files are two nodes, and neither can overwrite the other. See
         New-GraphNodeId and Resolve-GraphNodeCandidate for what that costs at
         the point a call has to be pointed at one of them.
-    .PARAMETER Show
-        Also save the graph as an HTML page in $env:TEMP\PSModuleDependencyGraph\<ModuleName>.html
-        and open it in the default browser. The graph is still returned.
+    .PARAMETER Name
+        Name of a module on PSModulePath or already loaded. The newest version is used
+        unless -RequiredVersion says otherwise.
+    .PARAMETER RequiredVersion
+        With -Name, the exact version to inspect.
+    .PARAMETER Path
+        A module folder, a .psd1, a .psm1, or a .ps1 script. A .ps1 or .psm1 with no
+        manifest next to it is inspected on its own.
+    .PARAMETER ModuleInfo
+        A module from Get-Module. Only its path is used; nothing is imported.
+    .PARAMETER ShowInBrowser
+        Also save the graph as $env:TEMP\PSModuleDependencyGraph\<ModuleName>.html and open
+        it in the default browser. The graph is still returned.
+    .PARAMETER ShowInVSCode
+        Also save the graph as $env:TEMP\PSModuleDependencyGraph\<ModuleName>.html and open
+        it in VS Code with the 'code' command. VS Code shows HTML as source unless a
+        preview extension, such as Live Preview, is installed. The graph is still returned.
     .EXAMPLE
-        Get-PSModuleDependencyGraph -Path ./ModuleTests/StandardModule/ManifestExport -Show
+        Get-PSModuleDependencyGraph -Name PSReadLine
+
+        Graphs an installed module by name.
+    .EXAMPLE
+        Get-PSModuleDependencyGraph -Path ./ModuleTests/StandardModule/ManifestExport -ShowInBrowser
+
+        Graphs a module folder and opens the result in the default browser.
+    .EXAMPLE
+        Get-Module -ListAvailable Pester | Select-Object -First 1 | Get-PSModuleDependencyGraph
+
+        Graphs a module passed from Get-Module.
     #>
     [CmdletBinding(DefaultParameterSetName = 'ByName')]
     [OutputType('ModuleDependencyGraph')]
@@ -40,7 +64,10 @@ function Get-PSModuleDependencyGraph {
         [System.Management.Automation.PSModuleInfo] $ModuleInfo,
 
         [Parameter()]
-        [switch] $Show
+        [switch] $ShowInBrowser,
+
+        [Parameter()]
+        [switch] $ShowInVSCode
     )
 
     process {
@@ -84,45 +111,19 @@ function Get-PSModuleDependencyGraph {
 
         foreach ($fn in $functions) {
             $id = New-GraphNodeId -Kind 'function' -ModuleBase $moduleBase -Path $fn.Path -Name $fn.Name
-            $nodes.Add([pscustomobject]@{
-                    PSTypeName   = 'PSModuleDependencyGraph.GraphNode'
-                    Id           = $id
-                    Name         = $fn.Name
-                    Kind         = 'Function'
-                    IsExported   = $fn.IsExported
-                    ExportState  = $fn.ExportState
-                    ExportSource = $fn.ExportSource
-                    Path         = $fn.Path
-                    StartLine    = $fn.StartLine
-                })
+            $nodes.Add((New-GraphNode -Id $id -Name $fn.Name -Kind 'Function' -Path $fn.Path -StartLine $fn.StartLine -EndLine $fn.EndLine -Function $fn))
             Add-NodeCandidate -NodeName $fn.Name -Id $id -NodePath $fn.Path
         }
 
         foreach ($c in $classes) {
             $id = New-GraphNodeId -Kind 'class' -ModuleBase $moduleBase -Path $c.Path -Name $c.Name
-            $nodes.Add([pscustomobject]@{
-                    PSTypeName = 'PSModuleDependencyGraph.GraphNode'
-                    Id         = $id
-                    Name       = $c.Name
-                    Kind       = 'Class'
-                    IsExported = $false
-                    Path       = $c.Path
-                    StartLine  = $c.StartLine
-                })
+            $nodes.Add((New-GraphNode -Id $id -Name $c.Name -Kind 'Class' -Path $c.Path -StartLine $c.StartLine -EndLine $c.EndLine))
             Add-NodeCandidate -NodeName $c.Name -Id $id -NodePath $c.Path
         }
 
         foreach ($e in $enums) {
             $id = New-GraphNodeId -Kind 'enum' -ModuleBase $moduleBase -Path $e.Path -Name $e.Name
-            $nodes.Add([pscustomobject]@{
-                    PSTypeName = 'PSModuleDependencyGraph.GraphNode'
-                    Id         = $id
-                    Name       = $e.Name
-                    Kind       = 'Enum'
-                    IsExported = $false
-                    Path       = $e.Path
-                    StartLine  = $e.StartLine
-                })
+            $nodes.Add((New-GraphNode -Id $id -Name $e.Name -Kind 'Enum' -Path $e.Path -StartLine $e.StartLine -EndLine $e.EndLine))
             Add-NodeCandidate -NodeName $e.Name -Id $id -NodePath $e.Path
         }
 
@@ -148,15 +149,9 @@ function Get-PSModuleDependencyGraph {
             if (-not $scriptNodes.ContainsKey($key)) {
                 $id = New-GraphNodeId -Kind 'script' -ModuleBase $moduleBase -Path $FilePath -Name '<script>'
                 $scriptNodes[$key] = $id
-                $nodes.Add([pscustomobject]@{
-                        PSTypeName = 'PSModuleDependencyGraph.GraphNode'
-                        Id         = $id
-                        Name       = '<script>'
-                        Kind       = 'Script'
-                        IsExported = $false
-                        Path       = $FilePath
-                        StartLine  = $FirstLine
-                    })
+                # A file's top level has no single extent: StartLine is its first
+                # call, and EndLine is left empty.
+                $nodes.Add((New-GraphNode -Id $id -Name '<script>' -Kind 'Script' -Path $FilePath -StartLine $FirstLine))
             }
             return $scriptNodes[$key]
         }
@@ -294,6 +289,43 @@ function Get-PSModuleDependencyGraph {
             }
         }
 
+        # Each node lists, by name, what it calls and what calls it. A function
+        # nothing calls and nothing exports is dangling: dead code, or an entry
+        # point the module forgot to export. Calls a function makes to itself do
+        # not count as use.
+        $nodeById = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+        foreach ($n in $nodes) { $nodeById[$n.Id] = $n }
+
+        # Id -> names, built in one pass over the edges rather than a scan per node.
+        $newIndex = { [System.Collections.Generic.Dictionary[string, System.Collections.Generic.SortedSet[string]]]::new([System.StringComparer]::Ordinal) }
+        $calls = & $newIndex
+        $callers = & $newIndex
+        $unresolvedCalls = & $newIndex
+        $addTo = {
+            param($Index, [string] $Key, [string] $Value)
+            if (-not $Index.ContainsKey($Key)) {
+                $Index[$Key] = [System.Collections.Generic.SortedSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+            }
+            [void]$Index[$Key].Add($Value)
+        }
+        foreach ($e in $edges) {
+            & $addTo $calls $e.Source $nodeById[$e.Target].Name
+            if ($e.Source -cne $e.Target) {
+                & $addTo $callers $e.Target $nodeById[$e.Source].Name
+            }
+        }
+        foreach ($u in $unresolved) {
+            & $addTo $unresolvedCalls ([string]$u.Source) $u.TargetName
+        }
+
+        foreach ($n in $nodes) {
+            if ($calls.ContainsKey($n.Id)) { $n.DependsOn = [string[]]@($calls[$n.Id]) }
+            if ($callers.ContainsKey($n.Id)) { $n.UsedBy = [string[]]@($callers[$n.Id]) }
+            if ($unresolvedCalls.ContainsKey($n.Id)) { $n.UnresolvedCalls = [string[]]@($unresolvedCalls[$n.Id]) }
+            $n.IsDangling = $n.Kind -eq 'Function' -and -not $n.IsExported -and -not $callers.ContainsKey($n.Id)
+        }
+        $dangling = @($nodes | Where-Object IsDangling)
+
         # Compute roots / leaves based on internal edges only.
         #
         # ORDINAL, for the reason $edgeSeen is. Keyed on @{}, two node ids
@@ -333,6 +365,7 @@ function Get-PSModuleDependencyGraph {
             Edges           = @($edges)
             Roots           = @($roots)
             Leaves          = @($leaves)
+            Dangling        = $dangling
             Unresolved      = @($unresolved)
             AmbiguousNames  = $ambiguousNames
             Functions       = $functions
@@ -346,6 +379,7 @@ function Get-PSModuleDependencyGraph {
                 EdgeCount          = $edges.Count
                 RootCount          = $roots.Count
                 LeafCount          = $leaves.Count
+                DanglingCount      = $dangling.Count
                 UnresolvedCount    = $unresolved.Count
                 FunctionCount      = $functions.Count
                 ClassCount         = $classes.Count
@@ -355,11 +389,12 @@ function Get-PSModuleDependencyGraph {
             }
         }
 
-        if ($Show) {
+        if ($ShowInBrowser -or $ShowInVSCode) {
             $tempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
             $reportPath = Join-Path (Join-Path $tempRoot 'PSModuleDependencyGraph') "$($graph.ModuleName).html"
             $report = $graph | Save-PSModuleDependencyGraphHtml -Path $reportPath
-            Start-Process -FilePath $report.FullName
+            if ($ShowInBrowser) { Show-GraphHtml -Path $report.FullName -In Browser }
+            if ($ShowInVSCode) { Show-GraphHtml -Path $report.FullName -In VSCode }
         }
 
         $graph

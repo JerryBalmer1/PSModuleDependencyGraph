@@ -57,9 +57,17 @@ function Get-PSModuleFunction {
             $isWorkflow = $false
             try { $isWorkflow = [bool]$fn.IsWorkflow } catch { $isWorkflow = $false }
 
-            $paramNames = @()
-            if ($fn.Body -and $fn.Body.ParamBlock -and $fn.Body.ParamBlock.Parameters) {
-                $paramNames = @($fn.Body.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+            $signature = Get-FunctionSignature -FunctionAst $fn
+            $help = Get-FunctionHelp -FunctionAst $fn
+
+            # Each parameter carries its .PARAMETER text, so a build can find
+            # parameters nobody documented.
+            foreach ($parameter in $signature.Parameters) {
+                $description = $null
+                if ($help -and $help.Parameters.PSObject.Properties[$parameter.Name]) {
+                    $description = $help.Parameters.PSObject.Properties[$parameter.Name].Value
+                }
+                $parameter | Add-Member -NotePropertyName Description -NotePropertyValue $description
             }
 
             # A function defined inside another function lives in that function's
@@ -98,7 +106,11 @@ function Get-PSModuleFunction {
                 IsExported      = $isExported
                 ExportState     = $exportState
                 ExportSource    = $exportPolicy.Source
-                Parameters      = $paramNames
+                CmdletBinding       = $signature.CmdletBinding
+                DefaultParameterSet = $signature.DefaultParameterSet
+                Parameters          = $signature.Parameters
+                ParameterSets       = $signature.ParameterSets
+                Help                = $help
                 Path            = $def.FilePath
                 StartLine       = $fn.Extent.StartLineNumber
                 StartColumn     = $fn.Extent.StartColumnNumber

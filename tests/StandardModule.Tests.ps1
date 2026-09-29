@@ -14,6 +14,7 @@ Describe 'StandardModule: Public / Private directories' {
             @{ Name = 'Read-SomethingStore'; Expected = $false }
             @{ Name = 'Write-SomethingStore'; Expected = $false }
             @{ Name = 'ConvertTo-SomethingObject'; Expected = $false }
+            @{ Name = 'Remove-SomethingCache'; Expected = $false }
         ) {
             $node = Get-FunctionNode $graph $Name
             $node.IsExported | Should -Be $Expected
